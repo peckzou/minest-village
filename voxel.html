@@ -154358,6 +154358,17 @@ window.KRail = (function () {
     '#vx-hud button.on{background:#2f9e44;border-color:#2f9e44;color:#fff}',
     '#vx-hud button:disabled{opacity:.38;cursor:default}',
     '#vx-stats{opacity:.85}',
+    '#vx-tools{display:none;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 12px;background:rgba(30,41,59,.92);color:#e2e8f0;',
+    'font:500 13px/1.35 system-ui,sans-serif;border-top:1px solid rgba(148,163,184,.25)}',
+    '#vx-tools.show{display:flex}',
+    '#vx-tools button{background:#334155;color:#e2e8f0;border:1px solid #475569;border-radius:8px;padding:6px 10px;cursor:pointer;font:500 13px system-ui}',
+    '#vx-tools button.on{background:#b7791f;border-color:#b7791f;color:#fff}',
+    '#vx-tools button.bon{background:#2563eb;border-color:#2563eb;color:#fff}',
+    '#vx-tools button:disabled{opacity:.38;cursor:default}',
+    '#vx-tools button.armed{background:#b91c1c;border-color:#b91c1c;color:#fff}',
+    '#vx-tools .sep{width:1px;height:20px;background:rgba(148,163,184,.4);margin:0 2px}',
+    '#vx-tools .lab{opacity:.75;font-size:12px}',
+    '#vx-tmsg{color:#fbbf24;font-size:12px;min-width:120px}',
     '#vx-cv{flex:1;position:relative;min-height:0}',
     '#vx-cv canvas{display:block}',
     '#vx-msg{position:absolute;left:50%;top:42%;transform:translate(-50%,-50%);background:rgba(15,23,42,.85);color:#fff;',
@@ -154382,13 +154393,23 @@ window.KRail = (function () {
     '<button data-m="room">🚪 房间</button><button data-m="fixture">🗄 展示</button><span class="sp"></span>' +
     '<button data-v="home">斜视</button><button data-v="side">侧面</button><button data-v="top">俯视</button><button data-v="low">低角度</button>' +
     '<button id="vx-rot">🔄 自动旋转</button><button id="vx-refresh">↻ 刷新</button><button id="vx-close">✕ 关闭</button></div>' +
+    '<div id="vx-tools"><span class="lab">🛠 地形工具</span>' +
+    '<button data-t="browse" class="on">👆 浏览</button><button data-t="raise">⛰ 升起</button><button data-t="lower">⬇ 降低</button>' +
+    '<button data-t="flatten">▦ 拉平</button><button data-t="smooth">∿ 平滑</button><button data-t="water">💧 造水</button>' +
+    '<button data-t="restore">🌿 恢复</button><span class="sep"></span><span class="lab">笔刷</span>' +
+    '<button data-b="1">1 格</button><button data-b="3" class="bon">3 格</button><button data-b="5">5 格</button><span class="sep"></span>' +
+    '<button id="vx-undo">↩ 撤销</button><button id="vx-redo">↪ 重做</button>' +
+    '<button id="vx-terrain-reset">🗑 重置地形</button><span id="vx-tmsg"></span></div>' +
     '<div id="vx-cv"><div id="vx-msg"></div></div>' +
-    '<div id="vx-hint">拖动旋转 · 滚轮 / 双指缩放 · 右键拖动平移 · <span id="vx-stats"></span></div>';
+    '<div id="vx-hint"><span id="vx-hint-tx">拖动旋转 · 滚轮 / 双指缩放 · 右键拖动平移</span> · <span id="vx-stats"></span></div>';
   document.body.appendChild(ov);
   var cvHost = ov.querySelector('#vx-cv');
   var msgEl = ov.querySelector('#vx-msg');
   var ctxEl = ov.querySelector('#vx-ctx');
   var statsEl = ov.querySelector('#vx-stats');
+  var toolsEl = ov.querySelector('#vx-tools');
+  var tmsgEl = ov.querySelector('#vx-tmsg');
+  var hintTxEl = ov.querySelector('#vx-hint-tx');
 
   function msg(t) { msgEl.textContent = t || ''; msgEl.style.display = t ? 'block' : 'none'; }
 
@@ -154495,9 +154516,10 @@ window.KRail = (function () {
     if (y + sy / 2 > this.max[1]) this.max[1] = y + sy / 2;
     if (z + sz / 2 > this.max[2]) this.max[2] = z + sz / 2;
   };
+  var unitGeo = null;
   Collector.prototype.build = function (THREE) {
     var g = new THREE.Group();
-    var geo = new THREE.BoxGeometry(1, 1, 1);
+    var geo = unitGeo || (unitGeo = new THREE.BoxGeometry(1, 1, 1));
     var dummy = new THREE.Object3D();
     var self = this;
     Object.keys(this.map).forEach(function (key) {
@@ -154785,8 +154807,10 @@ window.KRail = (function () {
     });
   }
 
-  function buildIsland(d) {
-    var col = new Collector();
+  /* Terrain data for an island: the automatic heightmap (phase-1 pipeline with
+     identical semantics, so theme counts/terrain do not regress) with the user's
+     saved edit deltas applied on top. delta[key] = edited height - auto height. */
+  function computeTerrain(d, delta) {
     var cells = {}, cellList = [];
     (d.land || []).forEach(function (k) {
       var c = k.split(','), i = +c[0], j = +c[1];
@@ -154809,11 +154833,8 @@ window.KRail = (function () {
       cellList.forEach(function (key) {
         var c = cells[key], dist = Math.hypot(c[0] - p.x, c[1] - p.y);
         if (dist > R) return;
-        var cand = dist <= Rp ? T : T * Math.max(0, 1 - (dist - Rp) / (R - Rp));
-        cand = cand * cand * (3 - 2 * cand / T) / T * T / T; // smooth-ish falloff
-        cand = dist <= Rp ? T : T * (1 - (dist - Rp) / (R - Rp));
         var t = dist <= Rp ? 1 : Math.max(0, 1 - (dist - Rp) / (R - Rp));
-        cand = T * (t * t * (3 - 2 * t));
+        var cand = T * (t * t * (3 - 2 * t));
         if (cand > H[key]) H[key] = cand;
       });
     });
@@ -154823,7 +154844,7 @@ window.KRail = (function () {
       if (!WATER_K[p.k]) return;
       cellsOf(p).forEach(function (key) { if (cells[key]) { waterCells[key] = 1; H[key] = -1; } });
     });
-    // relax: no cliff taller than ~2.4 between neighbours (except it may stay near cliffs)
+    // relax: no cliff taller than ~2.4 between neighbours
     for (var pass = 0; pass < 2; pass++) {
       var snap = Object.assign({}, H);
       cellList.forEach(function (key) {
@@ -154835,8 +154856,8 @@ window.KRail = (function () {
         if (mn !== Infinity && snap[key] - mn > 2.4) H[key] = mn + 2.4;
       });
     }
-    var HI = {};
-    cellList.forEach(function (key) { HI[key] = Math.max(-1, Math.min(7, Math.round(H[key]))); });
+    var autoHI = {};
+    cellList.forEach(function (key) { autoHI[key] = Math.max(-1, Math.min(7, Math.round(H[key]))); });
     // paths flatten to their neighbourhood
     var pathCells = {};
     pcs.forEach(function (p) {
@@ -154847,40 +154868,62 @@ window.KRail = (function () {
       var c = cells[key], sum = 0, n = 0;
       for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) {
         var nk = (c[0] + dx) + ',' + (c[1] + dy);
-        if (HI[nk] !== undefined && HI[nk] >= 0) { sum += HI[nk]; n++; }
+        if (autoHI[nk] !== undefined && autoHI[nk] >= 0) { sum += autoHI[nk]; n++; }
       }
-      if (n) HI[key] = Math.round(sum / n);
+      if (n) autoHI[key] = Math.round(sum / n);
     });
-    // histogram (acceptance evidence)
+    // user edits on top of the automatic terrain
+    var HI = {};
+    cellList.forEach(function (key) {
+      var v = autoHI[key];
+      if (delta && delta[key]) v = Math.max(-1, Math.min(7, v + delta[key]));
+      HI[key] = v;
+    });
     var hist = {};
     cellList.forEach(function (key) { var h = HI[key]; hist[h] = (hist[h] || 0) + 1; });
-    // terrain columns (visible shell only)
-    var topMat = d.ground === 'sand' ? 'sand' : d.ground === 'snow' ? 'snow' : d.ground === 'moss' ? 'moss_side' : 'grass_side';
-    var capMat = d.ground === 'sand' ? 'sand' : d.ground === 'snow' ? 'snow' : d.ground === 'moss' ? 'moss' : 'grass_top';
+    return { cells: cells, cellList: cellList, autoHI: autoHI, HI: HI, hist: hist, waterCells: waterCells, pathCells: pathCells, ground: d.ground };
+  }
+
+  function terrainMats(ground) {
+    return {
+      top: ground === 'sand' ? 'sand' : ground === 'snow' ? 'snow' : ground === 'moss' ? 'moss_side' : 'grass_side',
+      cap: ground === 'sand' ? 'sand' : ground === 'snow' ? 'snow' : ground === 'moss' ? 'moss' : 'grass_top'
+    };
+  }
+
+  /* Terrain column boxes (+ path slabs) for a subset of cells. Neighbour heights
+     come from the full heightmap, so per-plot chunks stay consistent at borders. */
+  function addTerrainCells(col, T, keys) {
+    var HI = T.HI, mats = terrainMats(T.ground);
     function nH(x, y) { var v = HI[x + ',' + y]; return v === undefined ? null : v; }
-    cellList.forEach(function (key) {
-      var c = cells[key], x = c[0], y = c[1], h = HI[key];
+    keys.forEach(function (key) {
+      var c = T.cells[key]; if (!c) return;
+      var x = c[0], y = c[1], h = HI[key];
       if (h < 0) { col.add('sand', x, y, -1.8, 1.03, 1.03, 0.45); return; }
       var sides = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(function (o) { return nH(x + o[0], y + o[1]); });
       for (var z = 0; z <= h; z++) {
         var exposed = z === h || sides.some(function (v) { return v === null || v < z; });
         if (!exposed) continue;
-        col.add(z === h ? topMat : z >= h - 2 ? 'dirt' : 'stone', x, y, z, 1.03, 1.03, 1.03);
+        col.add(z === h ? mats.top : z >= h - 2 ? 'dirt' : 'stone', x, y, z, 1.03, 1.03, 1.03);
       }
-      col.add(capMat, x, y, h + 0.58, 1.04, 1.04, 0.16); // grass-top cap: green surface, layered side
+      col.add(mats.cap, x, y, h + 0.58, 1.04, 1.04, 0.16); // grass-top cap
       if (sides.some(function (v) { return v === null; })) {
         col.add('dirt', x, y, -1, 1.03, 1.03, 1.03);
         col.add('stone', x, y, -2, 1.03, 1.03, 1.03);
       }
     });
-    // path / road slabs follow the terrain
-    Object.keys(pathCells).forEach(function (key) {
-      var c = cells[key], kind = pathCells[key];
+    keys.forEach(function (key) {
+      var kind = T.pathCells[key]; if (!kind) return;
+      var c = T.cells[key]; if (!c || HI[key] < 0) return;
       var mat = kind === 'pathway' ? 'cobble' : kind === 'r_zebra' ? ((c[0] + c[1]) % 2 ? 'white' : 'blackstone') : 'blackstone';
-      if (HI[key] >= 0) col.add(mat, c[0], c[1], HI[key] + 0.72, 1.05, 1.05, 0.12);
+      col.add(mat, c[0], c[1], HI[key] + 0.72, 1.05, 1.05, 0.12);
     });
-    // pieces sit on the terrain
-    pcs.forEach(function (p) {
+  }
+
+  /* Pieces sitting on the terrain (phase-1 placement rules, reading T.HI). */
+  function placePieces(col, d, T) {
+    var HI = T.HI;
+    (d.pc || []).forEach(function (p) {
       if (WATER_K[p.k]) {
         if (p.k === 'w_creek') col.add('cobble', p.x, p.y, 0.12, 3 * (p.s || 1), 1.25 * (p.s || 1), 0.28);
         return;
@@ -154890,11 +154933,11 @@ window.KRail = (function () {
       var base = HI[ck];
       if (base === undefined) { // nearest land cell
         var best = 1e9;
-        cellList.forEach(function (key) { var c = cells[key], dd = Math.abs(c[0] - p.x) + Math.abs(c[1] - p.y); if (dd < best) { best = dd; base = HI[key]; } });
+        T.cellList.forEach(function (key) { var c = T.cells[key], dd = Math.abs(c[0] - p.x) + Math.abs(c[1] - p.y); if (dd < best) { best = dd; base = HI[key]; } });
         if (base === undefined) base = 0;
       }
       var aquatic = p.k === 'y_dock' || p.k === 'b_row' || p.k === 'a_ducks';
-      if (base < 0 && !aquatic) { // a land piece centred on water sits on its highest shore cell instead
+      if (base < 0 && !aquatic) { // land piece centred on water sits on its highest shore cell
         var mx = null;
         cellsOf(p).forEach(function (key) { if (HI[key] !== undefined && HI[key] >= 0 && (mx === null || HI[key] > mx)) mx = HI[key]; });
         if (mx !== null) base = mx;
@@ -154902,12 +154945,19 @@ window.KRail = (function () {
       var baseZ = base < 0 || aquatic ? -0.42 : base + 0.66;
       if (p.k === 'lm_hobbiton') {
         renderPiece(col, p, baseZ, { noDoors: 1 });
-        carveHobbitDoors(col, p, HI, cells);
+        carveHobbitDoors(col, p, HI);
         return;
       }
       renderPiece(col, p, baseZ);
     });
-    return { col: col, hist: hist, cells: cellList.length, heights: HI, water: Object.keys(waterCells).length };
+  }
+
+  function buildIsland(d, delta) {
+    var T = computeTerrain(d, delta || null);
+    var col = new Collector();
+    addTerrainCells(col, T, T.cellList);
+    placePieces(col, d, T);
+    return { col: col, hist: T.hist, cells: T.cellList.length, heights: T.HI, water: Object.keys(T.waterCells).length, T: T };
   }
 
   function buildRoom(d, finish) {
@@ -155037,6 +155087,304 @@ window.KRail = (function () {
     return byLabel || ctx.d.pc[0] || null;
   }
 
+  /* ------------------------------------------------------------ terrain editing (phase 2)
+     User-editable system terrain tools for island mode. Edits live in a delta map
+     (edited height - automatic height) persisted to localStorage under a key bound
+     to the island's stable identity + plot count. The original app data is never
+     written; this stays a read-only overlay with a sidecar store, as in phase 1. */
+  var LS_PREFIX = 'vxterr.v1.';
+  var isl = null;   // island session {id, plots, d, T, delta, plotCells, chunks, root, terrRoot, pieceRoot, terrN, pieceN}
+  var tool = 'browse', brushSize = 3;
+  var undoStack = [], redoStack = [];
+  var stroke = null;         // {tool, targetH, touched:{}, prev:{}, next:{}}
+  var hlGroup = null, saveTimer = null, lastEditMs = null;
+  var TOOLNAME = { raise: '升起', lower: '降低', flatten: '拉平', smooth: '平滑', water: '造水', restore: '恢复草地' };
+
+  function islandId(d, ctx) {
+    var name = '';
+    if (ctx && ctx.crumbs && ctx.crumbs.length) name = ctx.crumbs[0];
+    if (!name && d && d.name) name = String(d.name);
+    if (!name) name = 'island';
+    try { // prefer the board's stable id when the crumb name matches a known board
+      var cands = [window.MinestAI, window.MinestKnowledge, window.MinestWorld];
+      for (var i = 0; i < cands.length; i++) {
+        var c = cands[i];
+        if (c && c.boards) {
+          var bs = c.boards() || [];
+          for (var j = 0; j < bs.length; j++) {
+            if (bs[j] && bs[j].id && (bs[j].name === name || bs[j].title === name)) return 'b:' + bs[j].id;
+          }
+        }
+      }
+    } catch (e) {}
+    return 'n:' + name;
+  }
+  function landSig(d) {
+    var s = (d.land || []).slice().sort().join('|'), h = 5381;
+    for (var i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+    return h.toString(36);
+  }
+  function parseDelta(o) {
+    var out = {};
+    Object.keys(o.delta || {}).forEach(function (k) { var v = o.delta[k] | 0; if (v) out[k] = v; });
+    return out;
+  }
+  function loadDelta(id, plots, sig) {
+    try {
+      var raw = localStorage.getItem(LS_PREFIX + id);
+      if (raw) {
+        var o = JSON.parse(raw);
+        if (o && o.plots === plots) return parseDelta(o);
+        localStorage.removeItem(LS_PREFIX + id); // same island, layout changed size: edits expire
+      }
+      // fallback: adopt an entry saved under a different id for this exact layout
+      // (identity resolution can vary with app navigation state; the layout cannot)
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (!k || k.indexOf(LS_PREFIX) !== 0 || k === LS_PREFIX + id) continue;
+        try {
+          var o2 = JSON.parse(localStorage.getItem(k));
+          if (o2 && o2.sig === sig && o2.plots === plots) return parseDelta(o2);
+        } catch (e) {}
+      }
+      return {};
+    } catch (e) { return {}; }
+  }
+  function saveDeltaNow() {
+    if (!isl) return;
+    try {
+      if (Object.keys(isl.delta).length) localStorage.setItem(LS_PREFIX + isl.id, JSON.stringify({ v: 1, plots: isl.plots, sig: isl.sig || '', delta: isl.delta, t: Date.now() }));
+      else localStorage.removeItem(LS_PREFIX + isl.id);
+    } catch (e) {}
+  }
+  function saveDelta() { if (saveTimer) clearTimeout(saveTimer); saveTimer = setTimeout(saveDeltaNow, 250); }
+
+  function plotKeyOf(x, y) { return Math.floor(x / 3) + ',' + Math.floor(y / 3); }
+  function islBounds() {
+    var minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9, maxH = 0;
+    isl.T.cellList.forEach(function (key) {
+      var c = isl.T.cells[key], h = isl.T.HI[key];
+      if (c[0] < minX) minX = c[0]; if (c[0] > maxX) maxX = c[0];
+      if (c[1] < minY) minY = c[1]; if (c[1] > maxY) maxY = c[1];
+      if (h > maxH) maxH = h;
+    });
+    (isl.d.pc || []).forEach(function (p) {
+      if (p.x - 3.5 < minX) minX = p.x - 3.5; if (p.x + 3.5 > maxX) maxX = p.x + 3.5;
+      if (p.y - 3.5 < minY) minY = p.y - 3.5; if (p.y + 3.5 > maxY) maxY = p.y + 3.5;
+    });
+    return { min: [minX - 1, minY - 1, -2.6], max: [maxX + 1, maxY + 1, maxH + 12] };
+  }
+  function disposeGroup(g) {
+    if (!g) return;
+    g.traverse(function (o) { if (o.isInstancedMesh && o.dispose) o.dispose(); });
+    if (g.parent) g.parent.remove(g);
+  }
+  function buildChunk(pk) {
+    var col = new Collector();
+    addTerrainCells(col, isl.T, isl.plotCells[pk] || []);
+    var g = col.build(T3);
+    g.userData.pk = pk; g.userData.n = col.n;
+    return g;
+  }
+  function rebuildChunks(pks) {
+    pks.forEach(function (pk) {
+      var old = isl.chunks[pk];
+      if (old) { isl.terrN -= old.userData.n || 0; disposeGroup(old); delete isl.chunks[pk]; }
+      if (!isl.plotCells[pk]) return;
+      var g = buildChunk(pk);
+      isl.chunks[pk] = g; isl.terrRoot.add(g); isl.terrN += g.userData.n;
+    });
+  }
+  function rebuildPiecesGroup() {
+    if (isl.pieceRoot) { isl.pieceN = 0; disposeGroup(isl.pieceRoot); isl.pieceRoot = null; }
+    var col = new Collector();
+    placePieces(col, isl.d, isl.T);
+    isl.pieceRoot = col.build(T3);
+    isl.pieceN = col.n;
+    isl.root.add(isl.pieceRoot);
+  }
+  function plotsAround(changedKeys) {
+    var set = {};
+    changedKeys.forEach(function (key) {
+      var c = isl.T.cells[key]; if (!c) return;
+      for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) {
+        if (isl.T.cells[(c[0] + dx) + ',' + (c[1] + dy)]) set[plotKeyOf(c[0] + dx, c[1] + dy)] = 1;
+      }
+    });
+    return Object.keys(set);
+  }
+  function piecesAffected(changedKeys) {
+    var dil = {};
+    changedKeys.forEach(function (key) {
+      var c = isl.T.cells[key]; if (!c) return;
+      for (var dx = -3; dx <= 3; dx++) for (var dy = -3; dy <= 3; dy++) dil[(c[0] + dx) + ',' + (c[1] + dy)] = 1;
+    });
+    return (isl.d.pc || []).some(function (p) {
+      if (WATER_K[p.k] || isRoad(p.k)) return false;
+      if (dil[Math.round(p.x) + ',' + Math.round(p.y)]) return true;
+      return cellsOf(p).some(function (k) { return dil[k]; });
+    });
+  }
+  function updateIslandStats() {
+    if (!isl) return;
+    var lvls = Object.keys(isl.T.hist).length;
+    statsEl.textContent = isl.plots + ' 地块 · ' + (isl.d.pc || []).length + ' 件 · 地形 ' + lvls + ' 级高度 · 体素块 ' +
+      (isl.terrN + isl.pieceN) + (lastEditMs != null ? ' · 编辑应用 ' + lastEditMs + 'ms' : '');
+  }
+  function afterHeightsChanged(changedKeys) {
+    if (!changedKeys.length) return;
+    var t0 = performance.now();
+    rebuildChunks(plotsAround(changedKeys));
+    if (piecesAffected(changedKeys)) rebuildPiecesGroup();
+    var hist = {};
+    isl.T.cellList.forEach(function (key) { var h = isl.T.HI[key]; hist[h] = (hist[h] || 0) + 1; });
+    isl.T.hist = hist;
+    if (lastBuild) { lastBuild.hist = hist; lastBuild.instances = isl.terrN + isl.pieceN; }
+    lastEditMs = Math.round(performance.now() - t0);
+    updateIslandStats();
+  }
+
+  function beginStroke(hit) {
+    stroke = { tool: tool, targetH: hit.h, touched: {}, prev: {}, next: {} };
+    applyBrush(hit.x, hit.y);
+  }
+  function applyBrush(cx, cy) {
+    if (!isl || !stroke) return;
+    var r = (brushSize - 1) / 2, changed = [];
+    for (var dx = -r; dx <= r; dx++) for (var dy = -r; dy <= r; dy++) {
+      var x = cx + dx, y = cy + dy, key = x + ',' + y;
+      if (!isl.T.cells[key] || stroke.touched[key]) continue;
+      stroke.touched[key] = 1;
+      var h = isl.T.HI[key], nh = h;
+      if (stroke.tool === 'raise') nh = Math.min(7, h + 1);
+      else if (stroke.tool === 'lower') nh = Math.max(-1, h - 1);
+      else if (stroke.tool === 'flatten') nh = stroke.targetH;
+      else if (stroke.tool === 'water') nh = -1;
+      else if (stroke.tool === 'restore') nh = isl.T.autoHI[key];
+      else if (stroke.tool === 'smooth') {
+        var sum = 0, n = 0;
+        for (var ax = -1; ax <= 1; ax++) for (var ay = -1; ay <= 1; ay++) {
+          var v = isl.T.HI[(x + ax) + ',' + (y + ay)];
+          if (v !== undefined) { sum += v; n++; }
+        }
+        nh = n ? Math.round(sum / n) : h;
+      }
+      if (nh !== h) {
+        if (stroke.prev[key] === undefined) stroke.prev[key] = h;
+        stroke.next[key] = nh;
+        isl.T.HI[key] = nh;
+        var dl = nh - isl.T.autoHI[key];
+        if (dl) isl.delta[key] = dl; else delete isl.delta[key];
+        changed.push(key);
+      }
+    }
+    if (changed.length) { afterHeightsChanged(changed); saveDelta(); }
+  }
+  function endStroke() {
+    if (stroke && Object.keys(stroke.prev).length) {
+      undoStack.push({ prev: stroke.prev, next: stroke.next });
+      if (undoStack.length > 40) undoStack.shift();
+      redoStack.length = 0;
+    }
+    stroke = null;
+    refreshToolUI();
+  }
+  function applyHeightMap(map) {
+    if (!isl) return;
+    var changed = [];
+    Object.keys(map).forEach(function (key) {
+      if (isl.T.HI[key] === undefined || isl.T.HI[key] === map[key]) return;
+      isl.T.HI[key] = map[key];
+      var dl = map[key] - isl.T.autoHI[key];
+      if (dl) isl.delta[key] = dl; else delete isl.delta[key];
+      changed.push(key);
+    });
+    if (changed.length) { afterHeightsChanged(changed); saveDelta(); }
+  }
+  function doUndo() { var rec = undoStack.pop(); if (!rec) return; redoStack.push(rec); applyHeightMap(rec.prev); refreshToolUI(); }
+  function doRedo() { var rec = redoStack.pop(); if (!rec) return; undoStack.push(rec); applyHeightMap(rec.next); refreshToolUI(); }
+  function resetTerrain() {
+    if (!isl) return;
+    var prev = {}, next = {};
+    Object.keys(isl.delta).forEach(function (key) { prev[key] = isl.T.HI[key]; next[key] = isl.T.autoHI[key]; });
+    if (!Object.keys(prev).length) { tmsg('地形已经是自动生成的样子'); return; }
+    undoStack.push({ prev: prev, next: next });
+    if (undoStack.length > 40) undoStack.shift();
+    redoStack.length = 0;
+    isl.delta = {};
+    applyHeightMap(next);
+    saveDeltaNow();
+    refreshToolUI();
+    tmsg('已重置为自动地形（可用撤销找回编辑）');
+  }
+
+  /* Picking: march the pointer ray through the voxel grid (no InstancedMesh
+     raycast dependency); the first cell whose top surface the ray reaches wins.
+     Terrain under a building can be picked on purpose, so pieces can be lifted. */
+  var rayc = null;
+  function pickCell(cx, cy) {
+    if (!isl || !renderer || !camera || !T3) return null;
+    var rect = renderer.domElement.getBoundingClientRect();
+    if (!rect.width) return null;
+    rayc = rayc || new T3.Raycaster();
+    rayc.setFromCamera(new T3.Vector2(((cx - rect.left) / rect.width) * 2 - 1, -((cy - rect.top) / rect.height) * 2 + 1), camera);
+    var o = rayc.ray.origin, dir = rayc.ray.direction, maxT = cam.dist + 90;
+    for (var t = 0.6; t < maxT; t += 0.15) {
+      var px = o.x + dir.x * t, py = o.y + dir.y * t, pz = o.z + dir.z * t;
+      var gx = Math.round(px), gy = Math.round(pz);           // three (x, up, south) -> world (x, y)
+      var key = gx + ',' + gy, h = isl.T.HI[key];
+      if (h === undefined) continue;
+      var top = h < 0 ? -0.45 : h + 0.66;
+      if (py <= top && py > top - 2.8) return { x: gx, y: gy, key: key, h: h };
+    }
+    return null;
+  }
+  function ensureHighlight() {
+    if (hlGroup || !T3 || !scene) return;
+    hlGroup = new T3.Group();
+    var geo = new T3.BoxGeometry(1.06, 0.2, 1.06);
+    var mat = new T3.MeshBasicMaterial({ color: 0xffe066, transparent: true, opacity: 0.45, depthWrite: false });
+    for (var i = 0; i < 25; i++) { var m = new T3.Mesh(geo, mat); m.visible = false; hlGroup.add(m); }
+    hlGroup.visible = false;
+    scene.add(hlGroup);
+  }
+  function showHighlight(hit) {
+    if (!isl) return;
+    ensureHighlight();
+    if (!hlGroup) return;
+    if (!hit) { hlGroup.visible = false; return; }
+    var r = (brushSize - 1) / 2, i = 0;
+    for (var dx = -r; dx <= r; dx++) for (var dy = -r; dy <= r; dy++) {
+      var key = (hit.x + dx) + ',' + (hit.y + dy), h = isl.T.HI[key];
+      var m = hlGroup.children[i++];
+      if (h === undefined) { m.visible = false; continue; }
+      m.visible = true;
+      m.position.set(hit.x + dx, (h < 0 ? -0.45 : h + 0.66) + 0.14, hit.y + dy);
+    }
+    for (; i < hlGroup.children.length; i++) hlGroup.children[i].visible = false;
+    hlGroup.visible = true;
+  }
+  function hideHighlight() { if (hlGroup) hlGroup.visible = false; }
+
+  function tmsg(t) { if (tmsgEl) tmsgEl.textContent = t || ''; }
+  function editActive() { return curMode === 'island' && !!isl && tool !== 'browse'; }
+  function updateHint() {
+    if (!hintTxEl) return;
+    if (curMode !== 'island') hintTxEl.textContent = '拖动旋转 · 滚轮 / 双指缩放 · 右键拖动平移（地形工具在岛屿模式可用）';
+    else if (editActive()) hintTxEl.textContent = '地形编辑中：左键点按 / 拖动 = ' + TOOLNAME[tool] + ' · 右键拖动旋转 · Shift+拖动平移 · 滚轮缩放 · Ctrl+Z 撤销 · Esc 回浏览';
+    else hintTxEl.textContent = '拖动旋转 · 滚轮 / 双指缩放 · 右键拖动平移 · 在上方选地形工具即可亲手改地形，编辑会自动保存';
+  }
+  function refreshToolUI() {
+    ov.querySelectorAll('[data-t]').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tool); });
+    ov.querySelectorAll('[data-b]').forEach(function (b) { b.classList.toggle('bon', +b.getAttribute('data-b') === brushSize); });
+    var u = ov.querySelector('#vx-undo'), r2 = ov.querySelector('#vx-redo');
+    if (u) u.disabled = !undoStack.length;
+    if (r2) r2.disabled = !redoStack.length;
+    updateHint();
+  }
+  function setTool(t) { if (stroke) endStroke(); tool = t; if (t === 'browse') hideHighlight(); refreshToolUI(); }
+  function setBrush(n) { brushSize = n; refreshToolUI(); }
+
   /* ------------------------------------------------------------ renderer + camera */
   var T3 = null, renderer = null, scene = null, camera = null, group3 = null, water3 = null;
   var cam = { az: 0.65, el: 0.72, dist: 60, tx: 0, ty: 0, tz: 0 };
@@ -155086,24 +155434,44 @@ window.KRail = (function () {
     var drags = {};
     el.style.touchAction = 'none';
     el.addEventListener('pointerdown', function (e) {
-      drags[e.pointerId] = { x: e.clientX, y: e.clientY, b: e.button };
+      var mode = 'rot';
+      if (e.shiftKey) mode = 'pan';
+      else if (e.button === 2) mode = editActive() ? 'rot' : 'pan'; // tool active: right-drag rotates; pan moves to Shift
+      else if (editActive() && e.button === 0 && Object.keys(drags).length === 0) mode = 'edit';
+      drags[e.pointerId] = { x: e.clientX, y: e.clientY, b: e.button, mode: mode };
       el.setPointerCapture(e.pointerId);
+      if (mode === 'edit') {
+        var hit = pickCell(e.clientX, e.clientY);
+        if (hit) { beginStroke(hit); showHighlight(hit); }
+      }
+      if (Object.keys(drags).length === 2 && stroke) endStroke(); // a second finger cancels the stroke
     });
     el.addEventListener('pointermove', function (e) {
-      var d0 = drags[e.pointerId]; if (!d0) return;
+      var d0 = drags[e.pointerId];
+      if (!d0) {
+        if (editActive() && e.pointerType === 'mouse') {
+          var hn = performance.now();
+          if (!el._lastHover || hn - el._lastHover >= 60) { el._lastHover = hn; showHighlight(pickCell(e.clientX, e.clientY)); }
+        }
+        return;
+      }
       var dx = e.clientX - d0.x, dy = e.clientY - d0.y;
       var ids = Object.keys(drags);
-      if (ids.length === 2) { // pinch handled on up/down via distance cache
+      if (ids.length === 2) { // pinch zoom
         var other = drags[ids[0]] === d0 ? drags[ids[1]] : drags[ids[0]];
         var nd = Math.hypot(e.clientX - other.x, e.clientY - other.y);
         if (d0.pd) cam.dist = Math.max(8, Math.min(600, cam.dist * d0.pd / Math.max(nd, 1)));
         d0.pd = nd;
-      } else if (d0.b === 2 || e.shiftKey) {
+      } else if (d0.mode === 'edit') {
+        var now = performance.now();
+        if (!d0.lastPick || now - d0.lastPick >= 45) {
+          d0.lastPick = now;
+          var hit = pickCell(e.clientX, e.clientY);
+          if (hit) { applyBrush(hit.x, hit.y); showHighlight(hit); }
+        }
+      } else if (d0.mode === 'pan') {
         var s = cam.dist * 0.0016, ca = Math.cos(cam.az), sa = Math.sin(cam.az);
         cam.tx -= (dx * ca) * s; cam.ty -= (-dx * sa) * s; // ground-plane pan (approx)
-        cam.tx -= 0; cam.ty -= 0;
-        cam.tz += 0; cam.tx += dy * 0 * s; cam.ty += 0;
-        // vertical pan with shift+vertical drag:
         cam.tz += dy * s * 0.4;
       } else {
         cam.az -= dx * 0.0052;
@@ -155112,9 +155480,14 @@ window.KRail = (function () {
       d0.x = e.clientX; d0.y = e.clientY;
       applyCam();
     });
-    function up(e) { delete drags[e.pointerId]; }
+    function up(e) {
+      var d0 = drags[e.pointerId];
+      if (d0 && d0.mode === 'edit' && stroke) endStroke();
+      delete drags[e.pointerId];
+    }
     el.addEventListener('pointerup', up);
     el.addEventListener('pointercancel', up);
+    el.addEventListener('pointerleave', function () { if (!Object.keys(drags).length) hideHighlight(); });
     el.addEventListener('wheel', function (e) {
       e.preventDefault();
       cam.dist = Math.max(8, Math.min(600, cam.dist * Math.exp(e.deltaY * 0.0011)));
@@ -155165,11 +155538,19 @@ window.KRail = (function () {
           extra = '放着 ' + built.items + ' 件物品';
         } else {
           if (!ctx.d || !ctx.d.land) throw new Error('还没有打开岛屿 — 先进入 My World 的岛屿');
-          built = buildIsland(ctx.d);
+          var islId = islandId(ctx.d, ctx);
+          var islPlots = (ctx.d.land || []).length;
+          if (isl && isl.id === islId) saveDeltaNow(); // flush pending edits of the outgoing session
+          if (!isl || isl.id !== islId) { undoStack = []; redoStack = []; }
+          var islSig = landSig(ctx.d);
+          var islDelta = loadDelta(islId, islPlots, islSig);
+          isl = { id: islId, plots: islPlots, sig: islSig, d: ctx.d, delta: islDelta, T: computeTerrain(ctx.d, islDelta), chunks: {}, plotCells: {}, terrN: 0, pieceN: 0, root: null, terrRoot: null, pieceRoot: null };
+          isl.T.cellList.forEach(function (key) { var c = isl.T.cells[key]; var pk = plotKeyOf(c[0], c[1]); (isl.plotCells[pk] || (isl.plotCells[pk] = [])).push(key); });
+          built = { hist: isl.T.hist, cells: isl.T.cellList.length };
           mode = 'island';
           title = '岛屿';
-          var lvls = Object.keys(built.hist).length;
-          extra = (ctx.d.land || []).length + ' 地块 · ' + (ctx.d.pc || []).length + ' 件 · 地形 ' + lvls + ' 级高度';
+          var lvls = Object.keys(isl.T.hist).length;
+          extra = islPlots + ' 地块 · ' + (ctx.d.pc || []).length + ' 件 · 地形 ' + lvls + ' 级高度';
           if (ctx.lv === 2) { // building level: focus the buildings
             var bs = (ctx.d.pc || []).filter(function (p) { return /^(c_|k_|lm_|h_|bld:)/.test(p.k) || p.k === 'school' || p.k === 'cottage' || p.k === 'cabin'; });
             if (bs.length) {
@@ -155180,25 +155561,42 @@ window.KRail = (function () {
           }
         }
       } catch (e) { msg(e.message); return; }
-      if (group3) scene.remove(group3);
+      if (group3) { scene.remove(group3); disposeGroup(group3); group3 = null; }
       if (water3) { scene.remove(water3); water3 = null; }
-      group3 = built.col.build(THREE);
-      scene.add(group3);
+      var colLike;
       if (mode === 'island') {
-        var w = (built.col.max[0] - built.col.min[0]) + 60, dep = (built.col.max[1] - built.col.min[1]) + 60;
+        isl.root = new THREE.Group();
+        isl.terrRoot = new THREE.Group();
+        isl.root.add(isl.terrRoot);
+        Object.keys(isl.plotCells).forEach(function (pk) { var g = buildChunk(pk); isl.chunks[pk] = g; isl.terrRoot.add(g); isl.terrN += g.userData.n; });
+        rebuildPiecesGroup();
+        group3 = isl.root;
+        scene.add(group3);
+        var bnd = islBounds();
+        colLike = { min: bnd.min, max: bnd.max, n: isl.terrN + isl.pieceN };
+        var w = (bnd.max[0] - bnd.min[0]) + 60, dep = (bnd.max[1] - bnd.min[1]) + 60;
         water3 = new THREE.Mesh(new THREE.PlaneGeometry(w, dep),
           new THREE.MeshLambertMaterial({ color: 0x1f5fc0, transparent: true, opacity: 0.93 }));
         water3.rotation.x = -Math.PI / 2;
-        water3.position.set((built.col.min[0] + built.col.max[0]) / 2, -0.45, (built.col.min[1] + built.col.max[1]) / 2);
+        water3.position.set((bnd.min[0] + bnd.max[0]) / 2, -0.45, (bnd.min[1] + bnd.max[1]) / 2);
         scene.add(water3);
+      } else {
+        saveDeltaNow();
+        isl = null;
+        hideHighlight();
+        group3 = built.col.build(THREE);
+        scene.add(group3);
+        colLike = built.col;
       }
       curMode = mode;
       setModeButtons();
-      fitCam(built.col, focus);
+      toolsEl.classList.toggle('show', mode === 'island');
+      refreshToolUI();
+      fitCam(colLike, focus);
       var ms = Math.round(performance.now() - t0);
-      lastBuild = { mode: mode, title: title, instances: built.col.n, ms: ms, hist: built.hist || null, cells: built.cells || null };
+      lastBuild = { mode: mode, title: title, instances: colLike.n, ms: ms, hist: built.hist || null, cells: built.cells || null };
       ctxEl.textContent = (ctx.crumbs && ctx.crumbs.length ? ctx.crumbs.join(' › ') + ' → ' : '') + title;
-      statsEl.textContent = extra + ' · 体素块 ' + built.col.n + ' · 重建 ' + ms + 'ms';
+      statsEl.textContent = extra + ' · 体素块 ' + colLike.n + ' · 重建 ' + ms + 'ms';
       msg('');
       resize();
     }).catch(function (e) { msg('体素引擎启动失败：' + (e && e.message || e)); });
@@ -155225,6 +155623,9 @@ window.KRail = (function () {
     rebuild(null);
   }
   function close() {
+    if (stroke) endStroke();
+    saveDeltaNow();
+    hideHighlight();
     ov.classList.remove('open');
     hidePop(ov);
     showPop(btn);
@@ -155240,6 +155641,30 @@ window.KRail = (function () {
   ov.querySelectorAll('[data-m]').forEach(function (b) {
     b.addEventListener('click', function () { rebuild(b.getAttribute('data-m')); });
   });
+  ov.querySelectorAll('[data-t]').forEach(function (b) {
+    b.addEventListener('click', function () { setTool(b.getAttribute('data-t')); });
+  });
+  ov.querySelectorAll('[data-b]').forEach(function (b) {
+    b.addEventListener('click', function () { setBrush(+b.getAttribute('data-b')); });
+  });
+  ov.querySelector('#vx-undo').addEventListener('click', doUndo);
+  ov.querySelector('#vx-redo').addEventListener('click', doRedo);
+  var resetBtn = ov.querySelector('#vx-terrain-reset');
+  var resetArmTimer = null;
+  resetBtn.addEventListener('click', function () {
+    if (!isl) return;
+    if (resetBtn.classList.contains('armed')) {
+      resetBtn.classList.remove('armed');
+      resetBtn.textContent = '🗑 重置地形';
+      if (resetArmTimer) clearTimeout(resetArmTimer);
+      resetTerrain();
+    } else {
+      resetBtn.classList.add('armed');
+      resetBtn.textContent = '⚠ 再点一次确认重置';
+      tmsg('重置会清掉这座岛的全部地形编辑（之后仍可用撤销找回）');
+      resetArmTimer = setTimeout(function () { resetBtn.classList.remove('armed'); resetBtn.textContent = '🗑 重置地形'; tmsg(''); }, 3500);
+    }
+  });
   var VIEWS = { home: [0.65, 0.72], side: [0.0, 0.3], top: [0.65, 1.45], low: [-0.7, 0.16] };
   ov.querySelectorAll('[data-v]').forEach(function (b) {
     b.addEventListener('click', function () {
@@ -155247,7 +155672,20 @@ window.KRail = (function () {
       if (v) { cam.az = v[0]; cam.el = v[1]; applyCam(); }
     });
   });
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && ov.classList.contains('open')) close(); });
+  // Window capture phase + stopPropagation: while the voxel overlay is open, its
+  // undo keys must not ALSO trigger the app's own Ctrl+Z (which would revert
+  // island data underneath the voxel session and desync the two). Window capture
+  // is the first listener position in the event path, ahead of the app's own
+  // document-level handlers regardless of registration order.
+  window.addEventListener('keydown', function (e) {
+    if (!ov.classList.contains('open')) return;
+    if (e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName || '')) return;
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (editActive()) setTool('browse'); else close(); return; }
+    if (curMode !== 'island') return;
+    var mod = e.ctrlKey || e.metaKey;
+    if (mod && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); e.stopPropagation(); doUndo(); }
+    else if (mod && (e.key === 'y' || (e.shiftKey && (e.key === 'Z')))) { e.preventDefault(); e.stopPropagation(); doRedo(); }
+  }, true);
 
   /* ------------------------------------------------------------ test / debug API */
   window.__voxel = {
@@ -155268,11 +155706,33 @@ window.KRail = (function () {
       applyCam();
     },
     heights: function () {
+      if (isl && curMode === 'island') {
+        return { hist: isl.T.hist, cells: isl.T.cellList.length, water: Object.keys(isl.T.waterCells).length, grid: Object.assign({}, isl.T.HI), auto: Object.assign({}, isl.T.autoHI) };
+      }
       var md = MD(); if (!md) return null;
-      var d = md.state(); if (!d) return null;
-      var b = buildIsland(d);
-      return { hist: b.hist, cells: b.cells, water: b.water };
+      var d = md.state(); if (!d || !d.land) return null;
+      var ctx = detectContext();
+      var b = buildIsland(d, loadDelta(islandId(d, ctx), (d.land || []).length, landSig(d)));
+      return { hist: b.hist, cells: b.cells, water: b.water, grid: Object.assign({}, b.heights), auto: Object.assign({}, b.T.autoHI) };
     },
+    terrain: {
+      id: function () { return isl ? isl.id : null; },
+      grid: function () { return isl ? Object.assign({}, isl.T.HI) : null; },
+      autoGrid: function () { return isl ? Object.assign({}, isl.T.autoHI) : null; },
+      edits: function () { return isl ? { id: isl.id, plots: isl.plots, delta: Object.assign({}, isl.delta), undo: undoStack.length, redo: redoStack.length } : null; },
+      setTool: function (t) { setTool(t); }, tool: function () { return tool; },
+      setBrush: function (n) { setBrush(n); }, brush: function () { return brushSize; },
+      undo: function () { doUndo(); }, redo: function () { doRedo(); },
+      reset: function () { resetTerrain(); },
+      lastEditMs: function () { return lastEditMs; }
+    },
+    project: function (x, y, z) {
+      if (!camera || !renderer || !T3) return null;
+      var v = new T3.Vector3(x, z, y).project(camera);
+      var rect = renderer.domElement.getBoundingClientRect();
+      return { x: rect.left + (v.x + 1) / 2 * rect.width, y: rect.top + (1 - v.y) / 2 * rect.height, behind: v.z > 1 };
+    },
+    pick: function (cx, cy) { return pickCell(cx, cy); },
     stats: function () {
       var md = MD(); if (!md || !md.state()) return null;
       var d = md.state();
