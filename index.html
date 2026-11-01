@@ -127425,6 +127425,7 @@ html body .mn-ico[data-ico=camera]:not(.mn-daily-trigger):not(.ph){background:co
       city: ['....kkk.....', '....klk.....', '...kkkkk....', '...klklk.kkk', '...kkkkk.klk', '...klklk.kkk', 'kkkkkkkkkklk', 'klklklklkkkk', 'kkkkkkkkkklk', 'klklklklkkkk', 'kkkkkkkkkkkk'],
       town: ['.....rr.....', '....rrrr....', '...rrrrrr...', '..rrrrrrrr..', '.rrrrrrrrrr.', '..nnnnnnnn..', '..nlnnnnln..', '..nnnBBnnn..', '..nnnBBnnn..', '..nnnBBnnn..'],
       village: ['....kkkk....', '...krrrrk...', '..krrrrrrk..', '..rrkwwkrr..', '..rrrrrrrr..', '..rrrwwrrr..', 'y..rrwwwwr..y', 'y..rrwwwwr..y', 'yy.rrwwwwr.yy', 'gggggggggggg', 'GGGGGGGGGGGG'],
+      hobbiton: ['....gggg....', '..gggggggg..', '.gggggggggg.', '.gggkkkkkgg.', '.gggkbybkgg.', '.gggkbbbkgg.', '..ggkbbkgg..', '..gggggggg..', '.gggggggggg.', 'gggggggggggg', 'GGGGGGGGGGGG'],
       dice: ['kkkkkkkkkk', 'kwwwwwwwwk', 'kwkwwwwwwk', 'kwwwwwwwwk', 'kwwwwkwwwk', 'kwwwwwwwwk', 'kwwwwwwkwk', 'kwwwwwwwwk', 'kkkkkkkkkk'],
       clear: ['rr......rr', 'rrr....rrr', '.rrr..rrr.', '..rrrrrr..', '...rrrr...', '..rrrrrr..', '.rrr..rrr.', 'rrr....rrr', 'rr......rr'],
       ring: ['...gggggg...', '..gG....Gg..', '.gG......Gg.', '.g........g.', '.g........g.', '.gG......Gg.', '..gG....Gg..', '...gggggg...'],
@@ -127547,8 +127548,8 @@ html body .mn-ico[data-ico=camera]:not(.mn-daily-trigger):not(.ph){background:co
 
     // Expand Island Land to 14×14 plots = 196 plots = 42×42 = 1,764 sq blocks (2× area!)
     // Note: MinestDisplay expects d.land to be an Array of "i,j" strings!
-    var plotsW = kind === 'village' ? 12 : 14;
-    var plotsH = kind === 'village' ? 12 : 14;
+    var plotsW = (kind === 'village' || kind === 'hobbiton') ? 12 : 14;
+    var plotsH = (kind === 'village' || kind === 'hobbiton') ? 12 : 14;
     var land = [];
     for (var li = 0; li < plotsW; li++) {
       for (var lj = 0; lj < plotsH; lj++) {
@@ -128139,6 +128140,116 @@ html body .mn-ico[data-ico=camera]:not(.mn-daily-trigger):not(.ph){background:co
       add('fl_sunflowers', 23.0, 31.0, 0);
       add('n_wheat', 29.0, 31.0, 0);
       add('car_pickup_old', 8.0, 34.0, 0, { s: 0.55, still: 1 });
+    } else if (kind === 'hobbiton') {
+      // Hobbiton (36×36 blocks) — a designed shire, not a scatter: the Hill with
+      // Bag End across the north (the app's own lm_hobbiton landmark — a moss
+      // hill with three round doors — flanked by n_hill grass cones), a party
+      // green with one great oak at the heart, hobbit holes along a dirt lane
+      // (pathway runs, never asphalt), a fence and flowers at every door, and
+      // the Water along the south: river, a stone-bridge creek, the Mill, a
+      // lake. alt seed only swaps small accents so the composition survives
+      // "Another layout".
+      var alt = seed > 1;
+
+      // — the dirt lane: west gate → the green → the market (8 linked runs)
+      for (var hp = 0; hp < 8; hp++) add('pathway', 2.5 + hp * 3, 17, 0);
+      // — the north spur up to Bag End's gate, the south path to the bridge
+      add('pathway', 13, 12, 1); add('pathway', 13, 15, 1);
+      add('pathway', 17.5, 20, 1); add('pathway', 17.5, 23, 1); add('pathway', 17.5, 25.8, 1);
+
+      // — The Hill (north): Bag End (scaled up, the visual centre) between two
+      // grass hills, a pair of stone crags behind it for contrast (a green
+      // mound on green grass needs a grey backdrop to read from afar), an
+      // oak wood on the north-east shoulder — kept clear of the island's own
+      // north-west corner, where a kept piece may already stand
+      add('n_cliff', 10.4, 1.9, 0);
+      add('n_cliff', 16.2, 1.9, 0);
+      add('n_oak', 21.5, 2.2, 0);
+      add('n_hill', 7.6, 6.2, 0, { s: 1.15 });
+      add('lm_hobbiton', 13, 5.8, 0, Object.assign(nextListExtra('🏡 袋底洞 Bag End', true) || {}, { s: 1.3 }));
+      add('n_hill', 18.4, 6.2, 0, { s: 1.15 });
+      add('bush', 9.6, 8.6, 0); add('bush', 16.6, 8.6, 0);
+      add('flowers', 13, 8.8, 0);
+      // Bag End's front garden: roses and tulips, a bench, a fence with a gate gap
+      add('fl_roses', 11.2, 9.3, 0);
+      add('fl_tulips', 14.8, 9.3, 0);
+      add('bench', 13, 9.4, 0);
+      add('fl_pots', 11.9, 10.3, 0); add('fl_pots', 14.1, 10.3, 0);
+      add('fence', 10.8, 10.9, 0); add('fence', 15.2, 10.9, 0);
+      add('well', 19.9, 9.6, 0, { label: '🚰 山脚古井' });
+      add('tree', 21.3, 5.4, 0, { s: 1.2 });
+
+      // — the west woods: pines, oaks, and a cottage in the trees
+      add('n_pine', 3.8, 11, 0);
+      add('cottage', 7.3, 13.2, 0, nextListExtra('🏠 林边小屋', true));
+      add('fence', 5.5, 13.2, 1);
+      add('garden', 7.3, 15.7, 0);
+      add('y_mailbox', 9.4, 15.9, 0);
+      add('mushroom', 5.6, 15.3, 0);
+      add('rock', 2.7, 14.8, 0);
+      add('signpost', 2.8, 18.9, 0, { label: '🪧 霍比屯路口' });
+      add('spruce', 1.9, 21.6, 0); add('spruce', 2.7, 25.2, 0);
+      add('bush', 4.4, 19.2, 0);
+
+      // — the party green: meadows, the great oak, a picnic, the market east
+      add('n_meadow', 15.8, 14.8, 0);
+      add('n_meadow', 21.5, 14.8, 0);
+      add('tree', 18.5, 13.2, 0, { s: 2, label: '🎉 派对大树 Party Tree' });
+      add('cherry', 20.4, 11.5, 0, { s: 1.2 });
+      add('y_picnic', 21.9, 12.1, 0);
+      add('bench', 16.3, 12.3, 0);
+      add('market', 25.8, 13.8, 0, { label: '🧺 绿地市集' });
+      add('crates', 28, 15.7, 0);
+      add('lamp', 15.7, 18.4, 0); add('lamp', 23.6, 18.4, 0); add('lamp', 11.8, 15.8, 0);
+      add('mob_gardener', 16.9, 15.4, 0, { still: 1 });
+      add('mob_villager', 24.3, 16, 0, { still: 1 });
+      add('n_orchard', 30.5, 13.5, 0);
+      add('fence', 30.5, 16.3, 0);
+
+      // — hobbit holes south of the lane: doors to the lane, gardens behind
+      add('cottage', 7.3, 21.3, 2, { label: '🏠 南坡小屋' });
+      add('fence', 7.3, 18.7, 0);
+      add('fl_lavender', 6.1, 19.7, 0); add('fl_daisies', 8.5, 19.7, 0);
+      add('y_veg', 7.3, 24.4, 0);
+      add('scarecrow', 9.8, 24.6, 0);
+      add('cabin', 12.8, 21.3, 2, { label: '🛖 原木洞屋' });
+      add('fl_pots', 11.5, 19.6, 0);
+      add('y_mailbox', 14.3, 19.7, 0);
+      add('spruce', 15.9, 22.6, 0);
+      add('h_family', 22.3, 21.3, 2, { label: '🏡 磨坊主之家' });
+      add('garden', 22.3, 19.6, 0);
+      add('cherry', 25.3, 20.4, 0);
+      add('farm', 20.6, 24.7, 0);
+      add('fence', 6, 25.8, 0); add('fence', 11, 25.8, 0); add('fence', 23.2, 25.8, 0);
+
+      // — the Water (south): a river in linked runs, the stone-bridge creek
+      for (var hr = 0; hr < 7; hr++) add('w_river', 3 + hr * 2, 27, 0);
+      add('w_creek', 17.5, 27, 1, { label: '🌉 石桥小溪' });
+      add('w_river', 20, 27, 0); add('w_river', 22, 27, 0);
+      add('windmill', 30.8, 24.2, 0, { label: '🌾 水边磨坊 The Mill', arch: 'dom:city', s: 1.2 });
+      add('w_lake', 31.3, 30.2, 0, { label: '🦢 磨坊湖', arch: 'dom:city' });
+      add('y_dock', 28.1, 29.9, 0);
+      add('b_row', 31.9, 30.5, 0, { still: 1 });
+      add('a_ducks', 30.4, 29.2, 0);
+      add('rock', 26.4, 26.1, 0);
+      add('bush', 26.7, 31.9, 0);
+      add('spruce', 34.6, 26.6, 0); add('spruce', 34.7, 33.6, 0);
+
+      // — east fields: the barn, wheat, pumpkins, a fenced pasture
+      add('barn', 28.8, 6.8, 0, { label: '🏚 大谷仓' });
+      add('n_wheat', 32.8, 6.5, 0);
+      add(alt ? 'n_meadow' : 'n_wheat', 29, 10.8, 0);
+      add('farm', 33.8, 10.6, 0);
+      add('mob_sheep', 30.8, 19, 0, { still: 1 });
+      add('mob_sheep', 32.7, 20.4, 0, { still: 1 });
+      add('fence', 31, 22.4, 0);
+      add('tree', 34.3, 16.9, 0, { s: 1.1 });
+
+      // — the quiet south-west meadow: breathing room, one bench facing the water
+      add('n_meadow', 5, 31.5, 0);
+      add('cherry', 9.6, 33.1, 0);
+      add('bench', 11.9, 30.7, 0);
+      add('tree', 3.2, 34.2, 0, { s: 1.3 });
     }
 
       d.pc = pcs; refreshLand();
@@ -128148,6 +128259,7 @@ html body .mn-ico[data-ico=camera]:not(.mn-daily-trigger):not(.ph){background:co
       return '<div class="wf-mega"><button type="button" data-wfmega="city"><i>' + px('city') + '</i><b>一键变 City</b><small>2× island · 21 districts · flagship avenue</small></button>' +
         '<button type="button" data-wfmega="town"><i>' + px('town') + '</i><b>一键变 Town</b><small>2× island · market town, green, school</small></button>' +
         '<button type="button" data-wfmega="village"><i>' + px('village') + '</i><b>一键变 Village</b><small>countryside · farms, barns and orchards</small></button>' +
+        '<button type="button" data-wfmega="hobbiton"><i>' + px('hobbiton') + '</i><b>一键变 Hobbiton</b><small>hillside holes · round doors and gardens</small></button>' +
         (has ? '<button type="button" class="sm" data-wfmega="again"><i>' + px('dice') + '</i><b>Another layout</b></button><button type="button" class="sm rm" data-wfmega="clear"><i>' + px('clear') + '</i><b>Clear the city</b></button>' : '') + '</div>';
     }
     function emoji(c) {   // the console reads by pictures: a leading emoji in a card or chip becomes its big icon
@@ -128266,7 +128378,7 @@ html body .mn-ico[data-ico=camera]:not(.mn-daily-trigger):not(.ph){background:co
         else {
           var mk = v === 'again' ? (W.mega && W.mega.kind) || 'city' : v, sd = v === 'again' ? ((W.mega && W.mega.seed) || 1) + 1 : 1;
           W.mega = { kind: mk, seed: sd }; change(function () { megaBuild(mk, sd); });
-          toast((mk === 'town' ? '🏘 Town' : mk === 'village' ? '🌾 Village' : '🏙 City') + ' built · ↶ Undo puts the island back');
+          toast((mk === 'town' ? '🏘 Town' : mk === 'village' ? '🌾 Village' : mk === 'hobbiton' ? '🏡 Hobbiton' : '🏙 City') + ' built · ↶ Undo puts the island back');
         }
         hap(); try { fit(); } catch (x) {} return setTimeout(draw, 60);
       }
